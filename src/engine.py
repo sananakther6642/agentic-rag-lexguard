@@ -4,73 +4,210 @@ from typing import TypedDict, List
 from langgraph.graph import StateGraph, END
 from langchain_ollama import ChatOllama
 
-# Ensure project root is in path for imports
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.database import search_knowledge
 
-# Define the shared data structure between nodes
 class GraphState(TypedDict):
     question: str
     documents: List[str]
     generation: str
-    relevance: str 
+    relevance: str
+    target_file: str
+    loop_count: int
 
-# Use a temperature of 0 for deterministic, repeatable grading
-model = ChatOllama(model="mistral-nemo", temperature=0)
+# Shared model used across retrieval, grading, and generation.
+model = ChatOllama(model="qwen2.5:3b", temperature=0)
 
 def retrieve_node(state: GraphState):
-    """Fetches documents from the vector database based on the query."""
-    docs = search_knowledge(state["question"])
-    # Extract only text content for the model to process
+    """
+    Retrieve supporting passages for the current query.
+    """
+    print("--- AGENT: EXECUTING RETRIEVAL ---")
+
+    question = state.get("question")
+    target_file = state.get("target_file")
+
+    docs = search_knowledge(
+        query=question,
+        filter_file=target_file,
+        k=10
+    )
+
     doc_texts = [d.page_content for d in docs]
     return {"documents": doc_texts}
 
 def grade_node(state: GraphState):
-    """Filters retrieved documents based on their relevance to the question."""
+    """
+    Determine whether the retrieved context is relevant enough to answer.
+    """
+    print("--- AGENT: DYNAMIC SEMANTIC GRADING ---")
+
+    if not state["documents"]:
+        return {"relevance": "no"}
+
     context = "\n".join(state["documents"])
-    # Grader prompt designed to force a binary 'yes' or 'no' response
+
     prompt = (
-        f"Analyze if this context answers the question.\n"
-        f"Context: {context}\n"
-        f"Question: {state['question']}\n"
-        f"Reply only with 'yes' or 'no'."
+        f"SYSTEM: You are a strict Information Validator.\n"
+        f"TASK: Determine whether the context contains information that can help answer the user question.\n\n"
+        f"USER QUESTION: {state['question']}\n"
+        f"CONTEXT: {context}\n\n"
+        f"EVALUATION CRITERIA:\n"
+        f"- Return 'yes' if the context directly or indirectly helps answer the question.\n"
+        f"- Return 'no' if the context is unrelated or does not contain the needed information.\n\n"
+        f"REPLY ONLY WITH 'yes' OR 'no':"
     )
+
     res = model.invoke(prompt)
     decision = res.content.strip().lower()
-    return {"relevance": "yes" if "yes" in decision else "no"}
+
+    final_decision = "yes" if "yes" in decision else "no"
+
+    print(f"DEBUG: Universal Grader Decision -> {final_decision}")
+    return {"relevance": final_decision}
 
 def generate_node(state: GraphState):
-    """Produces the final response using only the validated context."""
-    context = "\n".join(state["documents"])
-    prompt = f"Answer the question using only the provided context:\nContext: {context}\nQuestion: {state['question']}"
+    """
+    Generate the final answer from the validated context.
+    """
+    print("--- AGENT: ZERO-SHOT INVARIANT INFERENCE ---")
+
+    context = "\n\n".join(state["documents"])
+
+    prompt = (
+        f"CONTEXT MANIFOLD:\n{context}\n\n"
+        f"QUERY: {state['question']}\n\n"
+        f"Answer the question using only the context above."
+    )
+
     res = model.invoke(prompt)
     return {"generation": res.content}
 
-# Initialize the state machine
+def unified_reasoning_node(state: GraphState):
+    """
+    Extract a grounded answer from the retrieved context.
+    """
+    print("--- AGENT: EXECUTING ZERO-SHOT INFERENCE ---")
+
+    context = "\n\n".join(state["documents"])
+
+    prompt = (
+        f"CONTEXT MANIFOLD:\n{context}\n\n"
+        f"QUERY: {state['question']}\n\n"
+        f"Return a grounded answer from the context."
+    )
+
+    res = model.invoke(prompt)
+    content = res.content
+
+    relevance = "yes" if "RELEVANCE: YES" in content.upper() else "no"
+    clean_generation = content.replace("RELEVANCE: YES", "").replace("RELEVANCE: NO", "").strip()
+
+    return {
+        "generation": clean_generation,
+        "relevance": relevance
+    }
+
+def transform_query_node(state: GraphState):
+    """
+    Rewrite the query when the first retrieval pass is not sufficient.
+    """
+    print("--- AGENT: REWRITING QUERY FOR BETTER MANIFOLD PROBING ---")
+    print(f"--- AGENT: ATTEMPT {state.get('loop_count', 0) + 1} ---")
+    query = state["question"]
+
+    prompt = (
+        f"You are a retrieval optimizer. The initial search for '{query}' did not return enough context.\n"
+        f"Rewrite the query to be broader and more specific to document content.\n"
+        f"OUTPUT ONLY THE NEW QUERY:"
+    )
+
+    res = model.invoke(prompt)
+    return {
+        "question": res.content.strip(),
+        "loop_count": state.get("loop_count", 0) + 1
+    }
+
+def decide_to_generate(state: GraphState):
+    iteration = state.get("loop_count", 0)
+
+    if state["relevance"] == "yes" or iteration >= 2:
+        return "generate"
+
+    return "rewrite"
+
+def route_intent(state: GraphState):
+    query = state["question"].lower()
+    summary_triggers = ["about", "summary", "overview", "what is this", "general"]
+
+    if any(word in query for word in summary_triggers):
+        print("\n[TRACE] Router Decision: SUMMARY FAST-TRACK")
+        return "summary"
+
+    print("\n[TRACE] Router Decision: SPECIFIC RETRIEVAL")
+    return "retrieve"
+
+def summary_node(state: GraphState):
+    print("[TRACE] Executing Summary Node...")
+
+    docs = search_knowledge(state["question"], filter_file=state["target_file"], k=4)
+    context = "\n\n".join([d.page_content for d in docs])
+
+    prompt = (
+        f"CONTEXT MANIFOLD:\n{context}\n\n"
+        f"TASK: Provide a concise high-level summary of this document.\n"
+        f"OUTPUT:"
+    )
+
+    res = model.invoke(prompt)
+    return {
+        "generation": res.content,
+        "relevance": "yes",
+        "documents": [d.page_content for d in docs]
+    }
+
 workflow = StateGraph(GraphState)
 
-# Define the computational steps as nodes
 workflow.add_node("retrieve", retrieve_node)
-workflow.add_node("grade", grade_node)
+workflow.add_node("summary", summary_node)
+workflow.add_node("reasoning", grade_node)
 workflow.add_node("generate", generate_node)
+workflow.add_node("rewrite", transform_query_node)
 
-# Define the execution path
-workflow.set_entry_point("retrieve")
-workflow.add_edge("retrieve", "grade")
-
-# Logic gate: route to generation only if the grader approves relevance
-workflow.add_conditional_edges(
-    "grade",
-    lambda x: x["relevance"],
+workflow.set_conditional_entry_point(
+    route_intent,
     {
-        "yes": "generate",
-        "no": END
+        "summary": "summary",
+        "retrieve": "retrieve"
     }
 )
-workflow.add_edge("generate", END)
+workflow.add_edge("summary", END)
+workflow.add_edge("retrieve", "reasoning")
 
-# Compile the graph into an executable agent
+workflow.add_conditional_edges(
+    "reasoning",
+    decide_to_generate,
+    {
+        "generate": END,
+        "rewrite": "rewrite"
+    }
+)
+workflow.add_edge("rewrite", "retrieve")
+
 lexguard_agent = workflow.compile()
+
+
+def ask_lexguard(question: str, target_file: str = None):
+    """Run the agent for a single question and return the generated answer."""
+    inputs = {
+        "question": question,
+        "target_file": target_file,
+        "documents": [],
+        "relevance": "",
+        "loop_count": 0,
+    }
+    result = lexguard_agent.invoke(inputs)
+    return result.get("generation", "")
