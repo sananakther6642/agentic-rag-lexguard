@@ -8,10 +8,10 @@ if str(PROJECT_ROOT) not in sys.path:
 from src.engine import ask_lexguard
 
 if __name__ == "__main__":
-    query = "What is the invoice number and who is the sender?"
-    
-    print(f"🚀 LexGuard is thinking using your M3 GPU...")
+    query = "What is the invoice number?"
+
+    print("LexGuard is processing the query...")
     answer = ask_lexguard(query)
-    
-    print("\n🤖 FINAL ANSWER:")
+
+    print("\nFinal answer:")
     print(answer)

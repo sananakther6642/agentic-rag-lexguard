@@ -13,7 +13,7 @@ if __name__ == "__main__":
     # Example: "What is the total amount due?" or "Who is the sender?"
     user_query = "What is the total amount on this invoice?"
     
-    print(f"--- 🔍 Professor's Lab: Searching for '{user_query}' ---")
+    print(f"--- Searching for '{user_query}' ---")
     
     hits = search_knowledge(user_query)
     
