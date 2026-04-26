@@ -43,5 +43,6 @@ htmlcov/
 # Project-specific
 qdrant_storage/
 data/
+*.pdf
 .env
 .env.local
