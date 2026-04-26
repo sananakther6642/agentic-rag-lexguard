@@ -1,0 +1,53 @@
+services:
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: lexguard-db
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      - ./qdrant_storage:/qdrant/storage:z
+    restart: always
+    networks:
+      - lexguard-network
+
+  # Optional but highly recommended: Langfuse for Observability
+
+  langfuse:
+    image: langfuse/langfuse:latest
+    container_name: lexguard-obs
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - NEXTAUTH_URL=http://localhost:3000
+      - NEXTAUTH_SECRET=mysecret
+      - SALT=mysalt
+      - DATABASE_URL=postgresql://postgres:postgres@db:5432/postgres
+    networks:
+      - lexguard-network
+
+  db:
+    image: postgres:16
+    container_name: lexguard-obs-db
+    restart: always
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=postgres
+    ports:
+      - "5433:5432" # Changed to 5433 to avoid conflict with local postgres
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - lexguard-network
+
+networks:
+  lexguard-network:
+    driver: bridge
