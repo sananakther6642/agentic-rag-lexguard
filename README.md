@@ -1,6 +1,6 @@
-# LexGuard
+# LexGuard AI
 
-LexGuard is a local document assistant for PDF ingestion, retrieval, and question answering. It uses Qdrant for vector storage, Ollama for local model inference, and LangGraph for the agent workflow.
+LexGuard AI is a local document assistant for PDF ingestion, retrieval, and question answering. It uses Qdrant for vector storage, Ollama for local model inference, and LangGraph for the agent workflow.
 
 ## Features
 
