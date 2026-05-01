@@ -1,6 +1,6 @@
 [project]
 name = "agentic-rag-lexguard"
-version = "0.1.0"
+version = "1.0.0"
 description = "Agentic RAG for Zero-Shot Document Intelligence featuring Invariant Extraction and Semantic Independence"
 authors = [
     {name = "Sanan Akther", email = "sananakthar@gmail.com"}
