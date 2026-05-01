@@ -22,7 +22,7 @@ GraphLex AI is a local document assistant for PDF ingestion, retrieval, and ques
 ## Project Layout
 
 ```text
-LexGuard/
+GraphLex/
 ├── docker-compose.yml
 ├── pyproject.toml
 ├── README.md
